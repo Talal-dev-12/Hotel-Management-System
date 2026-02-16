@@ -15,7 +15,7 @@ exports.register = asyncHandler(async (req, res, next) => {
   if (userExists) {
     return next(new ErrorResponse('Email already registered', 400));
   }
-
+ 
   // Create user
   const user = await User.create({
     name,
