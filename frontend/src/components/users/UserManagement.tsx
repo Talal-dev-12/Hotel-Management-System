@@ -1,30 +1,17 @@
 import { Search, Plus, MoreVertical, Edit, Trash2, UserCheck } from 'lucide-react';
 import { useState, useEffect, useMemo, ChangeEvent, FormEvent } from 'react';
+import userService from '../../services/userService';
+import { useAuth } from '../../context/AuthContext';
+import type { UserProfile } from '../../types/auth.types';
+import type { CreateUserData } from '../../services/userService';
 
-interface StaffMember {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  department: string;
-  phone?: string;
-  status: string;
-  joinDate: string;
-  password?: string;
-}
-
-interface Guest {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  status: string;
-  visits: number;
-  lastVisit: string;
+interface FormData extends CreateUserData {
+  confirmPassword?: string;
 }
 
 export default function UserManagement() {
-  const [activeTab, setActiveTab] = useState<string>('staff');
+  const { user: currentUser } = useAuth();
+  const [activeTab, setActiveTab] = useState<'staff' | 'guests'>('staff');
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -33,71 +20,57 @@ export default function UserManagement() {
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [departmentFilter, setDepartmentFilter] = useState<string>('All Departments');
+  const [roleFilter, setRoleFilter] = useState<string>('All Roles');
   const [statusFilter, setStatusFilter] = useState<string>('All Status');
   
   // Data states
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [guests, setGuests] = useState<Guest[]>([]);
-  const [editingUser, setEditingUser] = useState<StaffMember | null>(null);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   
   // Form states
-  const [formData, setFormData] = useState<StaffMember>({
-    id: '',
+  const [formData, setFormData] = useState<FormData>({
     name: '',
     email: '',
-    role: 'Staff',
-    department: 'Operations',
+    password: '',
+    role: 'Guest',
     phone: '',
-    status: 'Active',
-    joinDate: '',
-    password: ''
+    address: '',
+    confirmPassword: ''
   });
 
-  // Fetch staff members on mount
+  // Fetch users on mount
   useEffect(() => {
-    fetchStaff();
-    fetchGuests();
-  }, []);
+    if (currentUser?.role === 'Admin' || currentUser?.role === 'Manager') {
+      fetchUsers();
+    }
+  }, [currentUser]);
 
-  const fetchStaff = async () => {
+  const fetchUsers = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/api/staff');
-      if (!response.ok) throw new Error('Failed to fetch staff');
-      const data = await response.json();
-      setStaffMembers(data);
       setError(null);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
+      const response = await userService.getUsers();
+      setUsers(response.data || []);
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to fetch users';
       setError(errorMessage);
-      console.error('Error fetching staff:', err);
+      console.error('Error fetching users:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchGuests = async () => {
-    try {
-      const response = await fetch('http://localhost:5000/api/guests');
-      if (!response.ok) throw new Error('Failed to fetch guests');
-      const data = await response.json();
-      setGuests(data);
-    } catch (err) {
-      console.error('Error fetching guests:', err);
-    }
-  };
-
-  // Filter staff based on search and filters
-  const filteredStaff = useMemo(() => {
-    return staffMembers.filter(staff => {
-      const matchesSearch = staff.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                           staff.email.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesDept = departmentFilter === 'All Departments' || staff.department === departmentFilter;
-      const matchesStatus = statusFilter === 'All Status' || staff.status === statusFilter;
-      return matchesSearch && matchesDept && matchesStatus;
+  // Filter users based on search and filters
+  const filteredUsers = useMemo(() => {
+    return users.filter(user => {
+      const matchesSearch = 
+        user.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        user.email.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesRole = roleFilter === 'All Roles' || user.role === roleFilter;
+      const matchesStatus = statusFilter === 'All Status' || user.status === statusFilter;
+      return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [staffMembers, searchTerm, departmentFilter, statusFilter]);
+  }, [users, searchTerm, roleFilter, statusFilter]);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -109,15 +82,13 @@ export default function UserManagement() {
 
   const resetForm = () => {
     setFormData({
-      id: '',
       name: '',
       email: '',
-      role: 'Staff',
-      department: 'Operations',
+      password: '',
+      role: 'Guest',
       phone: '',
-      status: 'Active',
-      joinDate: '',
-      password: ''
+      address: '',
+      confirmPassword: ''
     });
     setEditingUser(null);
   };
@@ -126,51 +97,52 @@ export default function UserManagement() {
     e.preventDefault();
     
     if (!formData.name || !formData.email || !formData.password) {
-      alert('Please fill in all required fields');
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
       return;
     }
 
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/api/staff', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData)
-      });
+      setError(null);
+      
+      const userData: CreateUserData = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role as any,
+        phone: formData.phone,
+        address: formData.address
+      };
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to add user');
-      }
-
-      const newUser = await response.json();
-      setStaffMembers([...staffMembers, newUser]);
+      const response = await userService.createUser(userData);
+      setUsers([...users, response.data]);
       resetForm();
       setShowAddModal(false);
-      alert('Staff member added successfully!');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-      alert(`Error: ${errorMessage}`);
-      console.error('Error adding staff:', err);
+      alert('User created successfully!');
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to create user';
+      setError(errorMessage);
+      console.error('Error creating user:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEditUser = (user: StaffMember) => {
+  const handleEditUser = (user: UserProfile) => {
     setEditingUser(user);
     setFormData({
-      id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      department: user.department,
+      password: '',
+      role: user.role as any,
       phone: user.phone || '',
-      status: user.status,
-      joinDate: user.joinDate,
-      password: ''
+      address: user.address || '',
+      confirmPassword: ''
     });
     setShowEditModal(true);
     setActiveMenu(null);
@@ -180,48 +152,42 @@ export default function UserManagement() {
     e.preventDefault();
     
     if (!formData.name || !formData.email || !editingUser) {
-      alert('Please fill in all required fields');
+      setError('Please fill in all required fields');
+      return;
+    }
+
+    if (formData.password && formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
       return;
     }
 
     try {
       setLoading(true);
-      const updateData: Partial<StaffMember> = {
+      setError(null);
+
+      const updateData: Partial<CreateUserData> = {
         name: formData.name,
         email: formData.email,
-        role: formData.role,
-        department: formData.department,
-        phone: formData.phone
+        role: formData.role as any,
+        phone: formData.phone,
+        address: formData.address
       };
       
       if (formData.password) {
         updateData.password = formData.password;
       }
 
-      const response = await fetch(`http://localhost:5000/api/staff/${editingUser.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(updateData)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update user');
-      }
-
-      const updatedUser = await response.json();
-      setStaffMembers(staffMembers.map(user =>
-        user.id === editingUser.id ? updatedUser : user
+      const response = await userService.updateUser(editingUser._id, updateData);
+      setUsers(users.map(user =>
+        user._id === editingUser._id ? response.data : user
       ));
       resetForm();
       setShowEditModal(false);
-      alert('Staff member updated successfully!');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-      alert(`Error: ${errorMessage}`);
-      console.error('Error updating staff:', err);
+      alert('User updated successfully!');
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to update user';
+      setError(errorMessage);
+      console.error('Error updating user:', err);
     } finally {
       setLoading(false);
     }
@@ -234,100 +200,63 @@ export default function UserManagement() {
 
     try {
       setLoading(true);
-      const response = await fetch(`http://localhost:5000/api/staff/${userId}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete user');
-      }
-
-      setStaffMembers(staffMembers.filter(user => user.id !== userId));
+      setError(null);
+      
+      await userService.deleteUser(userId);
+      setUsers(users.filter(user => user._id !== userId));
       setActiveMenu(null);
-      alert('Staff member deleted successfully!');
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-      alert(`Error: ${errorMessage}`);
-      console.error('Error deleting staff:', err);
+      alert('User deleted successfully!');
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to delete user';
+      setError(errorMessage);
+      console.error('Error deleting user:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleToggleStatus = async (userId: string) => {
-    const user = staffMembers.find(u => u.id === userId);
-    if (!user) {
-      alert('User not found');
-      return;
-    }
-    const newStatus = user.status === 'Active' ? 'Inactive' : 'Active';
-
+  const handleToggleStatus = async (userId: string, currentStatus: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`http://localhost:5000/api/staff/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ status: newStatus })
-      });
+      setError(null);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to update status');
+      let response;
+      if (currentStatus === 'active') {
+        response = await userService.deactivateUser(userId);
+      } else {
+        response = await userService.activateUser(userId);
       }
 
-      const updatedUser = await response.json();
-      setStaffMembers(staffMembers.map(u =>
-        u.id === userId ? updatedUser : u
+      setUsers(users.map(user =>
+        user._id === userId ? response.data : user
       ));
       setActiveMenu(null);
-      alert(`User ${newStatus === 'Active' ? 'activated' : 'deactivated'} successfully!`);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-      alert(`Error: ${errorMessage}`);
-      console.error('Error updating status:', err);
+      alert(`User ${currentStatus === 'active' ? 'deactivated' : 'activated'} successfully!`);
+    } catch (err: any) {
+      const errorMessage = err.message || 'Failed to update user status';
+      setError(errorMessage);
+      console.error('Error toggling user status:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBookRoom = async (guestId: string) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`http://localhost:5000/api/guests/${guestId}/book-room`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to book room');
-      }
-
-      const updatedGuest = await response.json();
-      setGuests(guests.map(g =>
-        g.id === guestId ? updatedGuest : g
-      ));
-      alert(`Room booked for ${updatedGuest.name}!`);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-      alert(`Error: ${errorMessage}`);
-      console.error('Error booking room:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Check if user has permission to manage users
+  if (currentUser?.role !== 'Admin' && currentUser?.role !== 'Manager') {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+        <h3 className="text-red-800 font-semibold mb-2">Access Denied</h3>
+        <p className="text-red-600">You don't have permission to access user management.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
-          <p className="text-gray-600 mt-1">Manage staff members and guest profiles</p>
+          <p className="text-gray-600 mt-1">Manage staff members and users</p>
         </div>
         <button
           onClick={() => {
@@ -344,7 +273,8 @@ export default function UserManagement() {
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-          {error}
+          <p className="font-semibold">Error:</p>
+          <p>{error}</p>
         </div>
       )}
 
@@ -360,17 +290,7 @@ export default function UserManagement() {
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Staff Members
-            </button>
-            <button
-              onClick={() => setActiveTab('guests')}
-              className={`px-6 py-4 font-medium transition-colors ${
-                activeTab === 'guests'
-                  ? 'text-emerald-600 border-b-2 border-emerald-600'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Guest Profiles
+              Users
             </button>
           </div>
         </div>
@@ -381,22 +301,23 @@ export default function UserManagement() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
               <input
                 type="text"
-                placeholder={`Search ${activeTab}...`}
+                placeholder="Search users by name or email..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
             <select 
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
-              <option>All Departments</option>
-              <option>Operations</option>
-              <option>Front Desk</option>
+              <option>All Roles</option>
+              <option>Admin</option>
+              <option>Manager</option>
+              <option>Receptionist</option>
               <option>Housekeeping</option>
-              <option>Maintenance</option>
+              <option>Guest</option>
             </select>
             <select 
               value={statusFilter}
@@ -404,150 +325,99 @@ export default function UserManagement() {
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option>All Status</option>
-              <option>Active</option>
-              <option>Inactive</option>
+              <option>active</option>
+              <option>inactive</option>
             </select>
           </div>
 
-          {activeTab === 'staff' ? (
-            <div className="overflow-x-auto">
-              {loading && <p className="text-center text-gray-600">Loading...</p>}
-              {filteredStaff.length === 0 && !loading ? (
-                <p className="text-center text-gray-600 py-8">No staff members found</p>
-              ) : (
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Name</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Role</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Email</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Department</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Join Date</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Status</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredStaff.map((staff) => (
-                      <tr key={staff.id} className="border-b border-gray-100 hover:bg-gray-50">
-                        <td className="py-4 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full flex items-center justify-center text-white font-semibold">
-                              {staff.name.charAt(0)}
+          <div className="overflow-x-auto">
+            {loading && <p className="text-center text-gray-600 py-8">Loading...</p>}
+            {filteredUsers.length === 0 && !loading ? (
+              <p className="text-center text-gray-600 py-8">No users found</p>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Name</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Email</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Role</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Phone</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Status</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-600">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUsers.map((user) => (
+                    <tr key={user._id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-4 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full flex items-center justify-center text-white font-semibold">
+                            {user.name.charAt(0).toUpperCase()}
+                          </div>
+                          <span className="font-medium text-gray-900">{user.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-700">{user.email}</td>
+                      <td className="py-4 px-4 text-sm">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                          {user.role}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-700">{user.phone || 'N/A'}</td>
+                      <td className="py-4 px-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          user.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {user.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <div className="relative">
+                          <button
+                            onClick={() => setActiveMenu(activeMenu === user._id ? null : user._id)}
+                            disabled={loading}
+                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <MoreVertical size={18} className="text-gray-600" />
+                          </button>
+                          {activeMenu === user._id && (
+                            <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 z-10">
+                              <button 
+                                onClick={() => handleEditUser(user)}
+                                disabled={loading}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left disabled:opacity-50"
+                              >
+                                <Edit size={16} className="text-gray-600" />
+                                <span className="text-sm text-gray-700">Edit</span>
+                              </button>
+                              <button 
+                                onClick={() => handleToggleStatus(user._id, user.status)}
+                                disabled={loading}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left disabled:opacity-50"
+                              >
+                                <UserCheck size={16} className="text-gray-600" />
+                                <span className="text-sm text-gray-700">
+                                  {user.status === 'active' ? 'Deactivate' : 'Activate'}
+                                </span>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteUser(user._id)}
+                                disabled={loading}
+                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-left disabled:opacity-50"
+                              >
+                                <Trash2 size={16} className="text-red-600" />
+                                <span className="text-sm text-red-600">Delete</span>
+                              </button>
                             </div>
-                            <span className="font-medium text-gray-900">{staff.name}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 text-sm text-gray-700">{staff.role}</td>
-                        <td className="py-4 px-4 text-sm text-gray-700">{staff.email}</td>
-                        <td className="py-4 px-4 text-sm text-gray-700">{staff.department}</td>
-                        <td className="py-4 px-4 text-sm text-gray-700">{staff.joinDate}</td>
-                        <td className="py-4 px-4">
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            staff.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {staff.status}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <div className="relative">
-                            <button
-                              onClick={() => setActiveMenu(activeMenu === staff.id ? null : staff.id)}
-                              disabled={loading}
-                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
-                            >
-                              <MoreVertical size={18} className="text-gray-600" />
-                            </button>
-                            {activeMenu === staff.id && (
-                              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-gray-200 z-10">
-                                <button 
-                                  onClick={() => handleEditUser(staff)}
-                                  disabled={loading}
-                                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left disabled:opacity-50"
-                                >
-                                  <Edit size={16} className="text-gray-600" />
-                                  <span className="text-sm text-gray-700">Edit</span>
-                                </button>
-                                <button 
-                                  onClick={() => handleToggleStatus(staff.id)}
-                                  disabled={loading}
-                                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 text-left disabled:opacity-50"
-                                >
-                                  <UserCheck size={16} className="text-gray-600" />
-                                  <span className="text-sm text-gray-700">
-                                    {staff.status === 'Active' ? 'Deactivate' : 'Activate'}
-                                  </span>
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteUser(staff.id)}
-                                  disabled={loading}
-                                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 text-left disabled:opacity-50"
-                                >
-                                  <Trash2 size={16} className="text-red-600" />
-                                  <span className="text-sm text-red-600">Delete</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {guests.length === 0 && !loading ? (
-                <p className="text-center text-gray-600 py-8">No guests found</p>
-              ) : (
-                guests.map((guest) => (
-                  <div key={guest.id} className="bg-gradient-to-br from-white to-gray-50 rounded-xl p-6 border border-gray-200 hover:shadow-lg transition-shadow">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                        {guest.name.charAt(0)}
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        guest.status === 'VIP' ? 'bg-purple-100 text-purple-700' :
-                        guest.status === 'Premium' ? 'bg-amber-100 text-amber-700' :
-                        'bg-blue-100 text-blue-700'
-                      }`}>
-                        {guest.status}
-                      </span>
-                    </div>
-                    <h3 className="font-semibold text-gray-900 mb-1">{guest.name}</h3>
-                    <p className="text-sm text-gray-600 mb-4">{guest.email}</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Phone:</span>
-                        <span className="text-gray-900">{guest.phone}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Total Visits:</span>
-                        <span className="font-semibold text-emerald-600">{guest.visits}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Last Visit:</span>
-                        <span className="text-gray-900">{guest.lastVisit}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mt-4 pt-4 border-t border-gray-200">
-                      <button className="flex-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors disabled:opacity-50" disabled={loading}>
-                        View Profile
-                      </button>
-                      <button 
-                        onClick={() => handleBookRoom(guest.id)}
-                        disabled={loading}
-                        className="flex-1 px-3 py-2 bg-gradient-to-r from-emerald-600 to-blue-600 text-white rounded-lg hover:from-emerald-700 hover:to-blue-700 text-sm font-medium transition-all disabled:opacity-50"
-                      >
-                        Book Room
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </div>
 
@@ -594,6 +464,17 @@ export default function UserManagement() {
                   />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password *</label>
+                  <input 
+                    type="password" 
+                    name="confirmPassword"
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                   <input 
                     type="tel" 
@@ -604,32 +485,30 @@ export default function UserManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select 
                     name="role"
                     value={formData.role}
                     onChange={handleInputChange}
+                    required
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option>Manager</option>
-                    <option>Staff</option>
-                    <option>Receptionist</option>
-                    <option>Housekeeping</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Manager">Manager</option>
+                    <option value="Receptionist">Receptionist</option>
+                    <option value="Housekeeping">Housekeeping</option>
+                    <option value="Guest">Guest</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
-                  <select 
-                    name="department"
-                    value={formData.department}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                  <input 
+                    type="text" 
+                    name="address"
+                    value={formData.address}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option>Operations</option>
-                    <option>Front Desk</option>
-                    <option>Housekeeping</option>
-                    <option>Maintenance</option>
-                  </select>
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
+                  />
                 </div>
               </div>
               <div className="p-6 border-t border-gray-200 flex gap-3 justify-end">
@@ -699,6 +578,16 @@ export default function UserManagement() {
                   />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password</label>
+                  <input 
+                    type="password" 
+                    name="confirmPassword"
+                    value={formData.confirmPassword}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
                   <input 
                     type="tel" 
@@ -709,32 +598,30 @@ export default function UserManagement() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Role *</label>
                   <select 
                     name="role"
                     value={formData.role}
                     onChange={handleInputChange}
+                    required
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option>Manager</option>
-                    <option>Staff</option>
-                    <option>Receptionist</option>
-                    <option>Housekeeping</option>
+                    <option value="Admin">Admin</option>
+                    <option value="Manager">Manager</option>
+                    <option value="Receptionist">Receptionist</option>
+                    <option value="Housekeeping">Housekeeping</option>
+                    <option value="Guest">Guest</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
-                  <select 
-                    name="department"
-                    value={formData.department}
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                  <input 
+                    type="text" 
+                    name="address"
+                    value={formData.address}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option>Operations</option>
-                    <option>Front Desk</option>
-                    <option>Housekeeping</option>
-                    <option>Maintenance</option>
-                  </select>
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
+                  />
                 </div>
               </div>
               <div className="p-6 border-t border-gray-200 flex gap-3 justify-end">
