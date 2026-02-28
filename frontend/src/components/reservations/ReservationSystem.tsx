@@ -231,29 +231,29 @@ export default function ReservationSystem() {
       return;
     }
 
-    try {
-      setCreatingGuest(true);
-      const totalAmount = calculateTotalAmount();
-      
-      // Create guest data - the API should create the guest if it doesn't exist
-      // Or you can use an existing guest service to create/fetch guest
-      const reservationData: CreateReservationData = {
-        guestId: formData.guestId || '', // Will be handled by API - send guest info in separate request
-        roomId: selectedRoom!._id,
-        checkInDate: formData.checkInDate,
-        checkOutDate: formData.checkOutDate,
-        numberOfGuests: formData.numberOfGuests,
-        totalAmount: totalAmount,
-        advancePayment: formData.advancePayment || 0,
-        specialRequests: formData.specialRequests || undefined,
-        bookingSource: formData.bookingSource
-      };
+   try {
+    const totalAmount = calculateTotalAmount();
+    
+    const reservationData: CreateReservationData = {
+      guestId: '',  // ← Empty, backend will create guest
+      roomId: selectedRoom!._id,
+      guestName: formData.guestName,        // ← Send guest info
+      guestEmail: formData.guestEmail,      // ←
+      guestPhone: formData.guestPhone,      // ←
+      checkInDate: formData.checkInDate,
+      checkOutDate: formData.checkOutDate,
+      numberOfGuests: formData.numberOfGuests,
+      totalAmount: totalAmount,
+      advancePayment: formData.advancePayment || 0,
+      specialRequests: formData.specialRequests || undefined,
+      bookingSource: formData.bookingSource
+    };
 
-      // NOTE: You may need to create guest first via a separate endpoint
-      // For now, we'll send the reservation with guest info embedded
-      // The backend should handle guest creation or use existing guest
-      
-      await createReservation(reservationData);
+    console.log('🔥 SENDING TO BACKEND:', reservationData);
+    console.log('Guest Name:', formData.guestName);
+    console.log('Guest Email:', formData.guestEmail);
+    console.log('Guest Phone:', formData.guestPhone);
+    await createReservation(reservationData);
       
       // Reset form
       setFormData({

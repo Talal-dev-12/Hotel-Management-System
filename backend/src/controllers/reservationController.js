@@ -1,5 +1,6 @@
 const Reservation = require('../models/Reservation');
 const Room = require('../models/Room');
+const Guest = require('../models/Guest');
 const asyncHandler = require('../middlewares/asyncHandler');
 const { ErrorResponse } = require('../utils/errorResponse');
 
@@ -45,14 +46,42 @@ exports.checkAvailability = asyncHandler(async (req, res, next) => {
  * @route   POST /api/reservations
  * @access  Private
  * 
- * ✅ FIXED: Handles missing guestId by using authenticated user
+ * ✅ UPDATED: Automatically creates guest if guestId is empty
  */
 exports.createReservation = asyncHandler(async (req, res, next) => {
-  let { roomId, checkInDate, checkOutDate, guestId } = req.body;
+  let { 
+    roomId, 
+    checkInDate, 
+    checkOutDate,
+    guestId,
+    guestName,        // ← Guest info from frontend
+    guestEmail,       // ←
+    guestPhone,       // ←
+    numberOfGuests,
+    totalAmount,
+    advancePayment,
+    specialRequests,
+    bookingSource
+  } = req.body;
 
-  // ✅ NEW: If no guestId provided, use authenticated user
+  // ✅ Step 1: Create or find guest if guestId is empty
   if (!guestId || guestId === '') {
-    guestId = req.user.id;
+    // Check if guest already exists by email
+    let guest = await Guest.findOne({ email: guestEmail.toLowerCase() });
+
+    if (!guest) {
+      // ✅ Create new guest
+      guest = await Guest.create({
+        name: guestName,
+        email: guestEmail,
+        phone: guestPhone,
+        bookingSource: bookingSource || 'Website',
+        newsletter: true,
+        promotions: true
+      });
+    }
+
+    guestId = guest._id;
   }
 
   // Check if room exists
@@ -77,20 +106,44 @@ exports.createReservation = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Room is not available for selected dates', 400));
   }
 
-  // Create reservation with validated guestId
+  // ✅ Step 2: Create reservation with the guest ID
   const reservation = await Reservation.create({
-    ...req.body,
-    guestId, // ✅ Use validated guestId (either provided or authenticated user)
+    guestId,
+    roomId,
+    checkInDate,
+    checkOutDate,
+    numberOfGuests,
+    totalAmount,
+    advancePayment: advancePayment || 0,
+    specialRequests: specialRequests || '',
+    bookingSource: bookingSource || 'Website',
     confirmedBy: req.user.id,
+    bookingStatus: 'Pending'  // Initial status is Pending
   });
 
-  // Populate guest and room details
+  // ✅ Step 3: Populate guest and room details
   await reservation.populate('guestId roomId');
+
+  // ✅ Step 4: Update guest stats (optional but recommended)
+  const nights = Math.ceil(
+    (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / 
+    (1000 * 60 * 60 * 24)
+  );
+  
+  const guest = await Guest.findById(guestId);
+  if (guest) {
+    guest.totalReservations += 1;
+    guest.totalNights += nights;
+    guest.totalSpent += totalAmount;
+    guest.lastVisit = new Date();
+    await guest.save();
+  }
 
   res.status(201).json({
     success: true,
     message: 'Reservation created successfully',
     data: reservation,
+    guest:guest
   });
 });
 

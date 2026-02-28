@@ -33,6 +33,9 @@ export interface Reservation {
 
 export interface CreateReservationData {
   guestId: string;
+  guestName: string;
+  guestEmail: string;
+  guestPhone: string;
   roomId: string;
   checkInDate: string;
   checkOutDate: string;

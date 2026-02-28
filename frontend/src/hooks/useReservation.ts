@@ -33,6 +33,7 @@ export const useReservation = () => {
       setError(null);
       const response = await reservationService.createReservation(data);
       if (response.data) {
+        console.log('Created reservation:', response.data);
         setReservations(prev => [...prev, response.data]);
         setCurrentReservation(response.data);
         return response.data;
