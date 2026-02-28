@@ -44,9 +44,16 @@ exports.checkAvailability = asyncHandler(async (req, res, next) => {
  * @desc    Create new reservation
  * @route   POST /api/reservations
  * @access  Private
+ * 
+ * ✅ FIXED: Handles missing guestId by using authenticated user
  */
 exports.createReservation = asyncHandler(async (req, res, next) => {
-  const { roomId, checkInDate, checkOutDate } = req.body;
+  let { roomId, checkInDate, checkOutDate, guestId } = req.body;
+
+  // ✅ NEW: If no guestId provided, use authenticated user
+  if (!guestId || guestId === '') {
+    guestId = req.user.id;
+  }
 
   // Check if room exists
   const room = await Room.findById(roomId);
@@ -70,9 +77,10 @@ exports.createReservation = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Room is not available for selected dates', 400));
   }
 
-  // Create reservation
+  // Create reservation with validated guestId
   const reservation = await Reservation.create({
     ...req.body,
+    guestId, // ✅ Use validated guestId (either provided or authenticated user)
     confirmedBy: req.user.id,
   });
 

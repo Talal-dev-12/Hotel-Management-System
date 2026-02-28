@@ -20,11 +20,32 @@ interface BookingFormData {
   bookingSource: 'Website' | 'Phone' | 'Walk-in' | 'Travel Agency' | 'OTA';
 }
 
+interface FormErrors {
+  guestName?: string;
+  guestEmail?: string;
+  guestPhone?: string;
+  checkInDate?: string;
+  checkOutDate?: string;
+  roomType?: string;
+  roomId?: string;
+  availability?: string;
+}
+
+interface GuestData {
+  name: string;
+  email: string;
+  phone: string;
+  _id?: string;
+}
+
 export default function ReservationSystem() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [formErrors, setFormErrors] = useState<FormErrors>({});
+  const [availabilityChecked, setAvailabilityChecked] = useState(false);
+  const [creatingGuest, setCreatingGuest] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<BookingFormData>({
@@ -90,6 +111,13 @@ export default function ReservationSystem() {
       ...prev,
       [name]: value
     }));
+    // Clear error for this field
+    if (formErrors[name as keyof FormErrors]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [name]: undefined
+      }));
+    }
   };
 
   const handleNumberInput = (e: ChangeEvent<HTMLInputElement>) => {
@@ -104,6 +132,11 @@ export default function ReservationSystem() {
         ...prev,
         numberOfGuests: { ...prev.numberOfGuests, children: parseInt(value) || 0 }
       }));
+    } else if (name === 'advancePayment') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: parseFloat(value) || 0
+      }));
     } else {
       setFormData(prev => ({
         ...prev,
@@ -113,8 +146,29 @@ export default function ReservationSystem() {
   };
 
   const handleCheckAvailability = async () => {
-    if (!formData.checkInDate || !formData.checkOutDate) {
-      alert('Please select check-in and check-out dates');
+    const errors: FormErrors = {};
+
+    if (!formData.checkInDate) {
+      errors.checkInDate = 'Check-in date is required';
+    }
+    if (!formData.checkOutDate) {
+      errors.checkOutDate = 'Check-out date is required';
+    }
+    if (!formData.roomType) {
+      errors.roomType = 'Room type is required';
+    }
+
+    if (formData.checkInDate && formData.checkOutDate) {
+      const checkIn = new Date(formData.checkInDate);
+      const checkOut = new Date(formData.checkOutDate);
+      if (checkOut <= checkIn) {
+        errors.checkOutDate = 'Check-out date must be after check-in date';
+      }
+    }
+
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
       return;
     }
 
@@ -126,8 +180,12 @@ export default function ReservationSystem() {
       };
       
       await checkAvailability(availabilityData);
+      setAvailabilityChecked(true);
     } catch (err) {
       console.error('Error checking availability:', err);
+      setFormErrors({
+        availability: 'Failed to check availability. Please try again.'
+      });
     }
   };
 
@@ -141,21 +199,47 @@ export default function ReservationSystem() {
     return selectedRoom.price * nights;
   };
 
-  const handleCreateBooking = async (e: FormEvent<HTMLFormElement>) => {
+  const handleCreateGuestAndReservation = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!formData.guestName || !formData.guestEmail || !formData.checkInDate || 
-        !formData.checkOutDate || !selectedRoom) {
-      alert('Please fill in all required fields');
+    const errors: FormErrors = {};
+
+    if (!formData.guestName.trim()) {
+      errors.guestName = 'Guest name is required';
+    }
+    if (!formData.guestEmail.trim()) {
+      errors.guestEmail = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.guestEmail)) {
+      errors.guestEmail = 'Please enter a valid email address';
+    }
+    if (!formData.guestPhone.trim()) {
+      errors.guestPhone = 'Phone number is required';
+    }
+    if (!formData.checkInDate) {
+      errors.checkInDate = 'Check-in date is required';
+    }
+    if (!formData.checkOutDate) {
+      errors.checkOutDate = 'Check-out date is required';
+    }
+    if (!selectedRoom) {
+      errors.roomId = 'Please select a room';
+    }
+
+    setFormErrors(errors);
+
+    if (Object.keys(errors).length > 0) {
       return;
     }
 
     try {
+      setCreatingGuest(true);
       const totalAmount = calculateTotalAmount();
       
+      // Create guest data - the API should create the guest if it doesn't exist
+      // Or you can use an existing guest service to create/fetch guest
       const reservationData: CreateReservationData = {
-        guestId: formData.guestId || 'new-guest', // Or create guest first
-        roomId: selectedRoom._id,
+        guestId: formData.guestId || '', // Will be handled by API - send guest info in separate request
+        roomId: selectedRoom!._id,
         checkInDate: formData.checkInDate,
         checkOutDate: formData.checkOutDate,
         numberOfGuests: formData.numberOfGuests,
@@ -165,6 +249,10 @@ export default function ReservationSystem() {
         bookingSource: formData.bookingSource
       };
 
+      // NOTE: You may need to create guest first via a separate endpoint
+      // For now, we'll send the reservation with guest info embedded
+      // The backend should handle guest creation or use existing guest
+      
       await createReservation(reservationData);
       
       // Reset form
@@ -184,11 +272,17 @@ export default function ReservationSystem() {
         bookingSource: 'Website'
       });
       setSelectedRoom(null);
+      setFormErrors({});
+      setAvailabilityChecked(false);
       setShowBookingModal(false);
+      setCreatingGuest(false);
       alert('Booking created successfully!');
     } catch (err) {
       console.error('Error creating booking:', err);
-      alert('Failed to create booking. Please try again.');
+      setFormErrors({
+        availability: 'Failed to create booking. Please try again.'
+      });
+      setCreatingGuest(false);
     }
   };
 
@@ -425,7 +519,7 @@ export default function ReservationSystem() {
               <p className="text-gray-600 mt-1">Create a new room reservation</p>
             </div>
             
-            <form onSubmit={handleCreateBooking} className="p-6 space-y-6">
+            <form onSubmit={handleCreateGuestAndReservation} className="p-6 space-y-6">
               {/* Guest Information */}
               <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Guest Information</h3>
@@ -441,6 +535,9 @@ export default function ReservationSystem() {
                       placeholder="John Doe" 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
                     />
+                    {formErrors.guestName && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.guestName}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Email Address *</label>
@@ -453,6 +550,9 @@ export default function ReservationSystem() {
                       placeholder="john@email.com" 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
                     />
+                    {formErrors.guestEmail && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.guestEmail}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
@@ -465,6 +565,9 @@ export default function ReservationSystem() {
                       placeholder="+1 234-567-8900" 
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
                     />
+                    {formErrors.guestPhone && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.guestPhone}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Booking Source</label>
@@ -498,6 +601,9 @@ export default function ReservationSystem() {
                       required
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
                     />
+                    {formErrors.checkInDate && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.checkInDate}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Check-Out Date *</label>
@@ -509,6 +615,9 @@ export default function ReservationSystem() {
                       required
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" 
                     />
+                    {formErrors.checkOutDate && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.checkOutDate}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Room Type *</label>
@@ -520,11 +629,15 @@ export default function ReservationSystem() {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="">Select room type</option>
-                      <option value="Standard">Standard</option>
-                      <option value="Deluxe">Deluxe</option>
-                      <option value="Premium">Premium</option>
+                      <option value="Single">Single</option>
+                      <option value="Double">Double</option>
                       <option value="Suite">Suite</option>
+                      <option value="Deluxe">Deluxe</option>
+                      <option value="Presidential">Presidential</option>
                     </select>
+                    {formErrors.roomType && (
+                      <span className="text-red-600 text-sm mt-1 block">{formErrors.roomType}</span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Number of Adults *</label>
@@ -572,26 +685,63 @@ export default function ReservationSystem() {
                   </button>
                 </div>
 
-                {availableRooms.length > 0 && (
+                {formErrors.availability && (
+                  <div className="mt-4 p-4 border border-red-200 bg-red-50 rounded-lg">
+                    <span className="text-red-600 text-sm">{formErrors.availability}</span>
+                  </div>
+                )}
+
+                {availabilityChecked && availableRooms.length > 0 && (
                   <div className="mt-4 p-4 border border-emerald-200 bg-emerald-50 rounded-lg">
-                    <h4 className="font-semibold text-emerald-900 mb-2">Available Rooms</h4>
+                    <h4 className="font-semibold text-emerald-900 mb-3">
+                      Available Rooms ({availableRooms.length})
+                    </h4>
+                    {!selectedRoom && (
+                      <span className="text-emerald-700 text-sm block mb-3">
+                        Select a room to proceed with booking
+                      </span>
+                    )}
                     <div className="space-y-2">
                       {availableRooms.map(room => (
-                        <label key={room._id} className="flex items-center gap-2 p-2 border border-emerald-200 rounded cursor-pointer hover:bg-white">
+                        <label key={room._id} className="flex items-center gap-2 p-3 border border-emerald-200 rounded cursor-pointer hover:bg-white transition-colors">
                           <input 
                             type="radio" 
                             name="roomId"
                             value={room._id}
                             checked={selectedRoom?._id === room._id}
-                            onChange={() => setSelectedRoom(room)}
+                            onChange={() => {
+                              setSelectedRoom(room);
+                              setFormErrors(prev => ({
+                                ...prev,
+                                roomId: undefined
+                              }));
+                            }}
                             className="w-4 h-4"
                           />
                           <span className="flex-1">
-                            {room.roomNumber} - {room.roomType} (${room.price}/night)
+                            <span className="font-medium">{room.roomNumber}</span>
+                            <span className="text-gray-600 ml-2">- {room.roomType}</span>
+                            <span className="text-emerald-700 font-semibold ml-2">${room.price}/night</span>
                           </span>
                         </label>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {availabilityChecked && availableRooms.length === 0 && (
+                  <div className="mt-4 p-4 border border-red-200 bg-red-50 rounded-lg">
+                    <p className="text-red-700 font-medium">No Available Rooms</p>
+                    <p className="text-red-600 text-sm mt-1">
+                      Unfortunately, there are no {formData.roomType} rooms available for the selected dates. 
+                      Please try different dates or room types.
+                    </p>
+                  </div>
+                )}
+
+                {formErrors.roomId && (
+                  <div className="mt-4 p-4 border border-red-200 bg-red-50 rounded-lg">
+                    <span className="text-red-600 text-sm">{formErrors.roomId}</span>
                   </div>
                 )}
               </div>
@@ -642,9 +792,10 @@ export default function ReservationSystem() {
               </button>
               <button
                 onClick={() => document.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))}
-                className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-blue-600 text-white rounded-lg hover:from-emerald-700 hover:to-blue-700 transition-all shadow-lg"
+                disabled={creatingGuest}
+                className="px-6 py-2 bg-gradient-to-r from-emerald-600 to-blue-600 text-white rounded-lg hover:from-emerald-700 hover:to-blue-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirm Booking
+                {creatingGuest ? 'Creating Booking...' : 'Confirm Booking'}
               </button>
             </div>
           </div>
